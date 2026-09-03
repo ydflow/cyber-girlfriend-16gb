@@ -1,0 +1,86 @@
+diff --git a/src/config/inference_config.py b/src/config/inference_config.py
+index 2d9f365..7d3db50 100644
+--- a/src/config/inference_config.py
++++ b/src/config/inference_config.py
+@@ -5,6 +5,7 @@ config dataclass used for inference
+ """
+ 
+ import cv2
++import numpy as np
+ from numpy import ndarray
+ import pickle as pkl
+ from dataclasses import dataclass, field
+@@ -15,6 +16,13 @@ def load_lip_array():
+     with open(make_abs_path('../utils/resources/lip_array.pkl'), 'rb') as f:
+         return pkl.load(f)
+ 
++def load_image_bgr(path: str):
++    """Read images from paths containing non-ASCII characters on Windows."""
++    image = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_COLOR)
++    if image is None:
++        raise ValueError(f"Unable to load image: {path}")
++    return image
++
+ @dataclass(repr=False)  # use repr from PrintableConfig
+ class InferenceConfig(PrintableConfig):
+     # HUMAN MODEL CONFIG, NOT EXPORTED PARAMS
+@@ -66,6 +74,6 @@ class InferenceConfig(PrintableConfig):
+     crf: int = 15  # crf for output video
+     output_fps: int = 25 # default output fps
+ 
+-    mask_crop: ndarray = field(default_factory=lambda: cv2.imread(make_abs_path('../utils/resources/mask_template.png'), cv2.IMREAD_COLOR))
++    mask_crop: ndarray = field(default_factory=lambda: load_image_bgr(make_abs_path('../utils/resources/mask_template.png')))
+     lip_array: ndarray = field(default_factory=load_lip_array)
+     size_gif: int = 256 # default gif size, TO IMPLEMENT
+diff --git a/src/live_portrait_pipeline.py b/src/live_portrait_pipeline.py
+index 2a58d40..4e788ca 100644
+--- a/src/live_portrait_pipeline.py
++++ b/src/live_portrait_pipeline.py
+@@ -107,9 +107,18 @@ class LivePortraitPipeline(object):
+             # NOTE: load from template, it is fast, but the cropping video is None
+             log(f"Load from template: {args.driving}, NOT the video, so the cropping video and audio are both NULL.", style='bold green')
+             driving_template_dct = load(args.driving)
+-            c_d_eyes_lst = driving_template_dct['c_eyes_lst'] if 'c_eyes_lst' in driving_template_dct.keys() else driving_template_dct['c_d_eyes_lst'] # compatible with previous keys
+-            c_d_lip_lst = driving_template_dct['c_lip_lst'] if 'c_lip_lst' in driving_template_dct.keys() else driving_template_dct['c_d_lip_lst']
+             driving_n_frames = driving_template_dct['n_frames']
++            # Expression-only templates do not carry eye/lip retargeting ratios.
++            # They are optional when retargeting is disabled, so keep compatible
++            # placeholders instead of rejecting an otherwise valid motion template.
++            c_d_eyes_lst = driving_template_dct.get(
++                'c_eyes_lst',
++                driving_template_dct.get('c_d_eyes_lst', [None] * driving_n_frames),
++            )
++            c_d_lip_lst = driving_template_dct.get(
++                'c_lip_lst',
++                driving_template_dct.get('c_d_lip_lst', [None] * driving_n_frames),
++            )
+             flag_is_driving_video = True if driving_n_frames > 1 else False
+             if flag_is_source_video and flag_is_driving_video:
+                 n_frames = min(len(source_rgb_lst), driving_n_frames)  # minimum number as the number of the animated frames
+diff --git a/src/utils/io.py b/src/utils/io.py
+index 9e4bc69..7f01b19 100644
+--- a/src/utils/io.py
++++ b/src/utils/io.py
+@@ -12,7 +12,9 @@ from .helper import mkdir, suffix
+ def load_image_rgb(image_path: str):
+     if not osp.exists(image_path):
+         raise FileNotFoundError(f"Image not found: {image_path}")
+-    img = cv2.imread(image_path, cv2.IMREAD_COLOR)
++    img = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
++    if img is None:
++        raise ValueError(f"Unable to load image: {image_path}")
+     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+ 
+ 
+@@ -75,9 +77,9 @@ def load_img_online(obj, mode="bgr", **kwargs):
+     n = kwargs.get("n", 2)
+     if isinstance(obj, str):
+         if mode.lower() == "gray":
+-            img = cv2.imread(obj, cv2.IMREAD_GRAYSCALE)
++            img = cv2.imdecode(np.fromfile(obj, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+         else:
+-            img = cv2.imread(obj, cv2.IMREAD_COLOR)
++            img = cv2.imdecode(np.fromfile(obj, dtype=np.uint8), cv2.IMREAD_COLOR)
+     else:
+         img = obj
+ 
