@@ -40,6 +40,10 @@
 *.db
 *.bak
 
+# Approved documentation images for the public README.
+!docs/images/
+!docs/images/*.png
+
 # Dependencies, model weights and runtimes
 **/node_modules/
 **/.venv/
